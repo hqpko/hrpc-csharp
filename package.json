@@ -1,0 +1,18 @@
+{
+  "name": "com.haiswork.hrpc",
+  "version": "0.0.1",
+  "displayName": "HRPC",
+  "description": "RPC Client",
+  "unity": "2019.4",
+  "unityRelease": "8f1",
+  "dependencies": {},
+  "keywords": [
+    "net",
+    "rpc"
+  ],
+  "author": {
+    "name": "haiswork",
+    "email": "whaibin01@126.com",
+    "url": "https://www.github.com/hqpko"
+  }
+}
