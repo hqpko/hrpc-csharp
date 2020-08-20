@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using UnityEngine;
 
 namespace com.haiswork.hrpc
 {
@@ -29,16 +30,30 @@ namespace com.haiswork.hrpc
         {
             await _conn.OnReadPacket(bytes =>
             {
-
+                var buf = HBuffer.NewBuffer(bytes);
+                var respType = buf.ReadByte();
+                if (respType == (byte)ReqType.Reply)
+                {
+                    var seq = buf.ReadUlong();
+                    var call = _dic[seq];
+                    if (call != null)
+                    {
+                        _dic.Remove(seq);
+                        call.SetResp(buf.GetRestBytes());
+                    }
+                }
+                ShowBytes(bytes);
             });
         }
         
         // 发送并等待应答
-        public async Task<byte[]> Call(Int32 pid, byte[] bytes , TimeSpan timeout)
+        public async Task<byte[]> Call(int pid, byte[] bytes , TimeSpan timeout)
         {
             _seq++;
             var call = new Call();
             _dic[_seq] = call;
+            ShowBytes(CreateReqPacket(pid, _seq, bytes));
+            await _conn.SendPacket(CreateReqPacket(pid, _seq, bytes));
             var tokenSource = new CancellationTokenSource();
             if (await Task.WhenAny(call.RespTask,Task.Delay(timeout,tokenSource.Token)) == call.RespTask)
             {
@@ -47,59 +62,35 @@ namespace com.haiswork.hrpc
             }
             throw new TimeoutException();
         }
-        
-        private byte[] CreateReqPacket(int pid, long seq, byte[] bytes)
-        {
-            var req = new byte[24+bytes.Length]; // len:4+pid(varint):10+seq(varint):10=24
-            int index = 4;
-            // write pid
-            index = PutVarintInt(req, index, pid);
 
-            // write seq
-            index = PutVarintLong(req, index, seq);
-            
-            // write bytes
-            Array.Copy(bytes, 0, req, index, bytes.Length);
-            int len = index + bytes.Length - 4;
-            
-            req[0] = (byte) (len << 24);
-            req[1] = (byte) (len << 16);
-            req[2] = (byte) (len << 8);
-            req[3] = (byte) (len);
-
-            return req.Take(len + 4).ToArray();
-        }
-
-        private int PutVarintLong(byte[] buf, int index, long value)
+        public static void ShowBytes(byte[] bytes)
         {
-            return PutVarint(buf, index, (ulong)EncodeZigZag(value, 64));
-        }
-        
-        private int PutVarintInt(byte[] buf,int index, int value)
-        {
-            return PutVarint(buf, index, (ulong)EncodeZigZag(value, 32));
-        }
-        
-        private int PutVarint(byte[] buf,int index, ulong value)
-        {
-            do
+            Debug.Log("start -----------");
+            for (var i = 0; i < bytes.Length; i++)
             {
-                var v = value & 0x7f;
-                value >>= 7;
-                if (value != 0)
+                var requestType = bytes[0];
+                if (requestType == (byte) ReqType.Call)
                 {
-                    v |= 0x80;
+                    
                 }
-
-                buf[index++] = (byte) v;
-            } while (value != 0);
-
-            return index;
+                Debug.Log(bytes[i]);
+            }
+            Debug.Log("end -----------");
         }
 
-        private long EncodeZigZag(long value, int bitSize)
+        public async Task OneWay(int pid, byte[] bytes)
         {
-            return (value << 1) ^ (value >> (bitSize - 1));
+            await _conn.SendPacket(CreateReqPacket(pid, _seq, bytes));
+        }
+        
+        private byte[] CreateReqPacket(int pid, ulong seq, byte[] bytes)
+        {
+            return HBuffer.NewBuffer(25 + bytes.Length).CreatePacket(pid, seq, bytes);
+        }
+
+        private byte[] CreateReqPacket(int pid, byte[] bytes)
+        {
+            return HBuffer.NewBuffer(24 + bytes.Length).CreatePacket(pid, bytes);
         }
 
         // 仅发送

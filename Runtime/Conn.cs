@@ -19,12 +19,12 @@ namespace com.haiswork.hrpc
             await connectTask.ConfigureAwait(false);
         }
 
-        protected async Task Send(byte[] bytes)
+        internal async Task SendPacket(byte[] bytes)
         {
             var asyncResult = _socket.BeginSend(bytes, 0, bytes.Length, SocketFlags.None, null, null); 
             await Task.Factory.FromAsync(asyncResult, _ => _socket.EndSend(asyncResult));  
         }
-
+        
         private async Task<byte[]> ReadOnePacket()
         {
             while (true)
@@ -51,8 +51,15 @@ namespace com.haiswork.hrpc
 
                 var asyncResult = _socket.BeginReceive(_buffer, _offset, _buffer.Length - _offset, SocketFlags.None,
                     null, null);
-                _offset += await Task<int>.Factory.FromAsync(asyncResult, _ => _socket.EndReceive(asyncResult));
+                var readSize = await Task<int>.Factory.FromAsync(asyncResult, _ => _socket.EndReceive(asyncResult));
+                _offset += readSize;
+                if (readSize == 0)
+                {
+                    break;
+                }
             }
+
+            return null;
         }
 
         private int ReadPacketLen()
