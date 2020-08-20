@@ -19,30 +19,4 @@ namespace com.haiswork.hrpc
             RespTask.Start();
         }
     }
-
-    public class Resp
-    {
-        public bool IsTimeout;
-        public byte[] Bytes;
-
-        internal Resp(bool timeout)
-        {
-            IsTimeout = timeout;
-        }
-
-        internal Resp(byte[] bytes)
-        {
-            Bytes = bytes;
-        }
-        
-        public static Resp Ok(byte[] bytes)
-        {
-            return new Resp(bytes);
-        }
-
-        public static Resp Timeout()
-        {
-            return new Resp(true);
-        }
-    }
 }
