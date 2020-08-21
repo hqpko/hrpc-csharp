@@ -35,9 +35,9 @@ namespace com.haiswork.hrpc
                 if (respType == (byte)ReqType.Reply)
                 {
                     var seq = buf.ReadUlong();
-                    var call = _dic[seq];
-                    if (call != null)
+                    if (_dic.ContainsKey(seq))
                     {
+                        var call = _dic[seq];
                         _dic.Remove(seq);
                         call.SetResp(buf.GetRestBytes());
                     }
