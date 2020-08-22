@@ -9,9 +9,11 @@ namespace com.haiswork.hrpc
 {
     public class Client
     {
-        private ulong _seq = 0;
-        private Conn _conn;
-        private Dictionary<ulong, Call> _dic = new Dictionary<ulong, Call>();
+        private ulong _seq;
+        private readonly Conn _conn;
+        private readonly Dictionary<ulong, Call> _dic = new Dictionary<ulong, Call>();
+
+        private Action<int, byte[]> _handlerReceivedOneWay;
 
         public static async Task<Client> Connect(string host, int port)
         {
@@ -41,8 +43,10 @@ namespace com.haiswork.hrpc
                         _dic.Remove(seq);
                         call.SetResp(buf.GetRestBytes());
                     }
+                }else if (respType == (byte) ReqType.OneWay)
+                {
+                    _handlerReceivedOneWay(buf.ReadInt(), buf.GetRestBytes());
                 }
-                ShowBytes(bytes);
             });
         }
         
@@ -52,7 +56,6 @@ namespace com.haiswork.hrpc
             _seq++;
             var call = new Call();
             _dic[_seq] = call;
-            ShowBytes(CreateReqPacket(pid, _seq, bytes));
             await _conn.SendPacket(CreateReqPacket(pid, _seq, bytes));
             var tokenSource = new CancellationTokenSource();
             if (await Task.WhenAny(call.RespTask,Task.Delay(timeout,tokenSource.Token)) == call.RespTask)
@@ -63,24 +66,9 @@ namespace com.haiswork.hrpc
             throw new TimeoutException();
         }
 
-        public static void ShowBytes(byte[] bytes)
-        {
-            Debug.Log("start -----------");
-            for (var i = 0; i < bytes.Length; i++)
-            {
-                var requestType = bytes[0];
-                if (requestType == (byte) ReqType.Call)
-                {
-                    
-                }
-                Debug.Log(bytes[i]);
-            }
-            Debug.Log("end -----------");
-        }
-
         public async Task OneWay(int pid, byte[] bytes)
         {
-            await _conn.SendPacket(CreateReqPacket(pid, _seq, bytes));
+            await _conn.SendPacket(CreateReqPacket(pid, bytes));
         }
         
         private byte[] CreateReqPacket(int pid, ulong seq, byte[] bytes)
@@ -93,20 +81,10 @@ namespace com.haiswork.hrpc
             return HBuffer.NewBuffer(24 + bytes.Length).CreatePacket(pid, bytes);
         }
 
-        // 仅发送
-        public async Task Send()
+        public void OnReceivedOneWay(Action<int, byte[]> handlerReceivedOneWay)
         {
-            await Task.Delay(10);
+            _handlerReceivedOneWay = handlerReceivedOneWay;
         }
-
-        public void OnReceivedOneWay(Action<byte[]> handlerReceivedOneWay)
-        {
-            
-        }
-
-        public async Task OnReadPacket(Action<byte[]> handlerReadPacket)
-        {
-            await _conn.OnReadPacket(handlerReadPacket);
-        }
+        
     }
 }

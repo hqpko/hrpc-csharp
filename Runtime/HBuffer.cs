@@ -37,7 +37,8 @@ namespace com.haiswork.hrpc
         internal byte[] CreatePacket(int pid, byte[] bytes)
         {
             return NewBuffer(24 + bytes.Length).WithHead()
-                .Write((byte) ReqType.OneWay).Write(bytes)
+                .Write((byte) ReqType.OneWay)
+                .Write(pid).Write(bytes)
                 .UpdateHead().GetBytes();
         }
 
