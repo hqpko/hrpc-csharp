@@ -3,7 +3,7 @@ using System.Linq;
 
 namespace com.haiswork.hrpc
 {
-    enum ReqType
+    internal enum ReqType
     {
         Unknown,
         Call,
@@ -11,9 +11,9 @@ namespace com.haiswork.hrpc
         Reply
     };
 
-    class HBuffer
+    internal class HBuffer
     {
-        private byte[] _buf;
+        private readonly byte[] _buf;
         private int _pos;
 
         internal static HBuffer NewBuffer(int cap)
@@ -26,34 +26,18 @@ namespace com.haiswork.hrpc
             return new HBuffer(bytes);
         }
         
-        internal byte[] CreatePacket(int pid, ulong seq, byte[] bytes)
-        {
-            return NewBuffer(24 + bytes.Length).WithHead()
-                .Write((byte) ReqType.Call)
-                .Write(pid).Write(seq).Write(bytes)
-                .UpdateHead().GetBytes();
-        }
-
-        internal byte[] CreatePacket(int pid, byte[] bytes)
-        {
-            return NewBuffer(24 + bytes.Length).WithHead()
-                .Write((byte) ReqType.OneWay)
-                .Write(pid).Write(bytes)
-                .UpdateHead().GetBytes();
-        }
-
         private HBuffer(int cap)
         {
             _buf = new byte[cap];
         }
 
-        private HBuffer WithHead()
+        internal HBuffer WithHead()
         {
             _pos = 4;
             return this;
         }
 
-        private HBuffer UpdateHead()
+        internal HBuffer UpdateHead()
         {
             var len = _pos - 4;
             _buf[0] = (byte) (len << 24);
@@ -121,25 +105,25 @@ namespace com.haiswork.hrpc
             throw new ArgumentException();
         }
 
-        private HBuffer Write(byte b)
+        internal HBuffer Write(byte b)
         {
             _buf[_pos++] = b;
             return this;
         }
         
-        private HBuffer Write(int i)
+        internal HBuffer Write(int i)
         {
             _pos = Varint.PutVarint(_buf, _pos, i);
             return this;
         }
 
-        private HBuffer Write(ulong u)
+        internal HBuffer Write(ulong u)
         {
             _pos = Varint.PutVarint(_buf, _pos, u);
             return this;
         }
 
-        private HBuffer Write(byte[] bytes)
+        internal HBuffer Write(byte[] bytes)
         {
             Array.Copy(bytes, 0, _buf, _pos, bytes.Length);
             _pos += bytes.Length;

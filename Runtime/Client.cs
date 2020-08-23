@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using UnityEngine;
 
 namespace com.haiswork.hrpc
 {
@@ -56,7 +54,7 @@ namespace com.haiswork.hrpc
             _seq++;
             var call = new Call();
             _dic[_seq] = call;
-            await _conn.SendPacket(CreateReqPacket(pid, _seq, bytes));
+            await _conn.SendPacket(CreatePacket(pid, _seq, bytes));
             var tokenSource = new CancellationTokenSource();
             if (await Task.WhenAny(call.RespTask,Task.Delay(timeout,tokenSource.Token)) == call.RespTask)
             {
@@ -68,17 +66,23 @@ namespace com.haiswork.hrpc
 
         public async Task OneWay(int pid, byte[] bytes)
         {
-            await _conn.SendPacket(CreateReqPacket(pid, bytes));
+            await _conn.SendPacket(CreatePacket(pid, bytes));
         }
         
-        private byte[] CreateReqPacket(int pid, ulong seq, byte[] bytes)
+        private static byte[] CreatePacket(int pid, ulong seq, byte[] bytes)
         {
-            return HBuffer.NewBuffer(25 + bytes.Length).CreatePacket(pid, seq, bytes);
+            return HBuffer.NewBuffer(20 + bytes.Length).WithHead() // pid:5+seq:10+len:4+reqType:1 = 20
+                .Write((byte) ReqType.Call)
+                .Write(pid).Write(seq).Write(bytes)
+                .UpdateHead().GetBytes();
         }
 
-        private byte[] CreateReqPacket(int pid, byte[] bytes)
+        private static byte[] CreatePacket(int pid, byte[] bytes)
         {
-            return HBuffer.NewBuffer(24 + bytes.Length).CreatePacket(pid, bytes);
+            return HBuffer.NewBuffer(10 + bytes.Length).WithHead() // len:4+pid:5+reqType:1=10
+                .Write((byte) ReqType.OneWay)
+                .Write(pid).Write(bytes)
+                .UpdateHead().GetBytes();
         }
 
         public void OnReceivedOneWay(Action<int, byte[]> handlerReceivedOneWay)

@@ -1,8 +1,6 @@
-using System;
-
 namespace com.haiswork.hrpc
 {
-    public class Varint
+    internal class Varint
     {
         internal static int PutVarint(byte[] buf,int index, int value)
         {
