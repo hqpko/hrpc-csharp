@@ -1,6 +1,6 @@
 {
   "name": "com.haiswork.hrpc",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "displayName": "HRPC",
   "description": "RPC Client",
   "unity": "2019.4",
