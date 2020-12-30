@@ -4,81 +4,68 @@ using System.Threading.Tasks;
 
 namespace com.haiswork.hrpc
 {
-    class Conn
+    internal class Conn
     {
-        private static int _defMaxBufferLen = 64 * 1024;// 64k
+        private const int MaxBufferSize = 64 * 1024; // 64k
+        private const int HeadSize = 4;
+
+        private int _timeoutMilliseconds;
         private Socket _socket;
-        private readonly byte[] _buffer = new byte[_defMaxBufferLen];
+        private readonly byte[] _buffer = new byte[MaxBufferSize];
         private int _offset;
-        internal async Task Connect(string host, int port)
+
+        internal static async Task<Conn> Connect(string host, int port, int timeoutMilliseconds)
         {
-            _socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp);
-            var connectTask = Task.Factory.FromAsync(_socket.BeginConnect, _socket.EndConnect, host, port, null);
-            await connectTask.ConfigureAwait(false);
+            var conn = new Conn
+            {
+                _timeoutMilliseconds = timeoutMilliseconds,
+                _socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp)
+            };
+            await Task.Run(() => conn._socket.Connect(host, port)).TimeoutAfter(timeoutMilliseconds);
+            return conn;
         }
 
-        internal async Task SendPacket(byte[] bytes)
+        internal async Task Send(byte[] bytes)
         {
-            var asyncResult = _socket.BeginSend(bytes, 0, bytes.Length, SocketFlags.None, null, null); 
-            await Task.Factory.FromAsync(asyncResult, _ => _socket.EndSend(asyncResult));  
+            await Task.Run(() => _socket.Send(bytes)).TimeoutAfter(_timeoutMilliseconds);
         }
-        
-        private async Task<byte[]> ReadOnePacket()
+
+        private async Task<byte[]> MustReadOnePacket()
         {
             while (true)
             {
-                var len = ReadPacketLen();
-                if (len > _defMaxBufferLen)
-                {
-                    throw new Exception("over max reading size");
-                }
+                var packet = ReadOnePacket();
+                if (packet != null) return packet;
 
-                if (len > 0 && _offset >= len + 4)
-                {
-                    var packet = new byte[len];
-                    Buffer.BlockCopy(_buffer,4,packet,0,len);
-                    var remain = _offset - len - 4;
-                    if (remain > 0)
-                    {
-                        Buffer.BlockCopy(_buffer,len+4,_buffer,0,remain);                        
-                    }
-
-                    _offset -= len + 4;
-                    return packet;
-                }
-
-                var asyncResult = _socket.BeginReceive(_buffer, _offset, _buffer.Length - _offset, SocketFlags.None,
-                    null, null);
-                var readSize = await Task<int>.Factory.FromAsync(asyncResult, _ => _socket.EndReceive(asyncResult));
+                var readSize = await Task.Run(
+                    () => _socket.Receive(_buffer, _offset, _buffer.Length - _offset, SocketFlags.None)
+                ).TimeoutAfter(_timeoutMilliseconds);
                 _offset += readSize;
-                if (readSize == 0)
-                {
-                    break;
-                }
+                if (readSize == 0) return null; // return null if socket closed
             }
-
-            return null;
         }
 
-        private int ReadPacketLen()
+        private byte[] ReadOnePacket()
         {
-            if (_offset > 4)
-            {
-                return _buffer[3] | _buffer[2] << 8 | _buffer[1] << 16 | _buffer[0] << 24;
-            }
+            if (_offset < 4) return null;
+            var len = _buffer[3] | _buffer[2] << 8 | _buffer[1] << 16 | _buffer[0] << 24;
+            if (len > MaxBufferSize) throw new Exception("over max reading size");
+            if (len <= 0 || _offset < len + HeadSize) return null;
 
-            return 0;
+            var packetBytes = new byte[len];
+            Buffer.BlockCopy(_buffer, HeadSize, packetBytes, 0, len);
+            var packetSize = _offset - len - HeadSize;
+            if (packetSize > 0) Buffer.BlockCopy(_buffer, len + HeadSize, _buffer, 0, packetSize);
+            _offset -= len + HeadSize;
+            return packetBytes;
         }
 
         internal async Task OnReadPacket(Action<byte[]> handlerReadPacket)
         {
             while (true)
             {
-                var packet = await ReadOnePacket();
-                if (packet == null)
-                {
-                    break;
-                }
+                var packet = await MustReadOnePacket();
+                if (packet == null) break;
                 handlerReadPacket(packet);
             }
         }
