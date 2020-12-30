@@ -1,77 +1,98 @@
 using System;
 using System.Collections.Generic;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace com.haiswork.hrpc
 {
     public class Client
     {
+        private const int MillisecondsTimeout = 8000;
+
         private ulong _seq;
-        private readonly Conn _conn;
+        private Conn _conn;
+        private int _millisecondsTimeout;
         private readonly Dictionary<ulong, Call> _dic = new Dictionary<ulong, Call>();
 
         private Action<int, byte[]> _handlerReceivedOneWay;
 
-        public static async Task<Client> Connect(string host, int port)
+        public static async Task<Client> Connect(string host, int port, int millisecondsTimeout = -1)
         {
-            var conn = new Conn();
-            await conn.Connect(host, port);
-            var client = new Client(conn);
-            return client;
+            if (millisecondsTimeout <= 0) millisecondsTimeout = MillisecondsTimeout;
+            var conn = await Conn.Connect(host, port, millisecondsTimeout);
+            return new Client
+            {
+                _millisecondsTimeout = millisecondsTimeout,
+                _conn = conn
+            };
         }
-        
-        private Client(Conn conn)
+
+        public Client OnReceivedOneWay(Action<int, byte[]> handlerReceivedOneWay)
         {
-            _conn = conn;
+            _handlerReceivedOneWay = handlerReceivedOneWay;
+            return this;
         }
 
         public async void Run()
         {
-            await _conn.OnReadPacket(bytes =>
-            {
-                var buf = HBuffer.NewBuffer(bytes);
-                var respType = buf.ReadByte();
-                if (respType == (byte)ReqType.Reply)
-                {
-                    var seq = buf.ReadUlong();
-                    if (_dic.ContainsKey(seq))
-                    {
-                        var call = _dic[seq];
-                        _dic.Remove(seq);
-                        call.SetResp(buf.GetRestBytes());
-                    }
-                }else if (respType == (byte) ReqType.OneWay)
-                {
-                    _handlerReceivedOneWay(buf.ReadInt(), buf.GetRestBytes());
-                }
-            });
-        }
-        
-        // 发送并等待应答
-        public async Task<byte[]> Call(int pid, byte[] bytes , TimeSpan timeout)
-        {
-            _seq++;
-            var call = new Call();
-            _dic[_seq] = call;
-            await _conn.SendPacket(CreatePacket(pid, _seq, bytes));
-            var tokenSource = new CancellationTokenSource();
-            if (await Task.WhenAny(call.RespTask,Task.Delay(timeout,tokenSource.Token)) == call.RespTask)
-            {
-                tokenSource.Cancel();
-                return await call.RespTask;
-            }
-            throw new TimeoutException();
+            await _conn.OnReadPacket(OnReadPacket);
         }
 
-        public async Task OneWay(int pid, byte[] bytes)
+        private void OnReadPacket(byte[] bytes)
         {
-            await _conn.SendPacket(CreatePacket(pid, bytes));
+            var buf = HBuffer.NewBuffer(bytes);
+            var respType = buf.ReadByte();
+            switch (respType)
+            {
+                case (byte) ReqType.Reply:
+                    var seq = buf.ReadUlong();
+                    if (RemoveCall(seq, out var call))
+                        call.SetResp(buf.GetRestBytes());
+                    break;
+                case (byte) ReqType.OneWay:
+                    _handlerReceivedOneWay(buf.ReadInt(), buf.GetRestBytes());
+                    break;
+            }
         }
-        
+
+        public async Task Send(int pid, byte[] bytes)
+        {
+            await _conn.Send(CreatePacket(pid, bytes));
+        }
+
+        // 发送并等待应答
+        public async Task<byte[]> Call(int pid, byte[] bytes)
+        {
+            var call = AddCall();
+            await _conn.Send(CreatePacket(pid, _seq, bytes));
+
+            return await call.RespTask.TimeoutAfter(_millisecondsTimeout);
+        }
+
+        private Call AddCall()
+        {
+            var call = new Call();
+            lock (_dic)
+            {
+                _seq++;
+                _dic[_seq] = call;
+                return call;
+            }
+        }
+
+        private bool RemoveCall(ulong seq, out Call call)
+        {
+            lock (_dic)
+            {
+                if (!_dic.TryGetValue(seq, out call)) return false;
+
+                _dic.Remove(seq);
+                return true;
+            }
+        }
+
         private static byte[] CreatePacket(int pid, ulong seq, byte[] bytes)
         {
-            return HBuffer.NewBuffer(20 + bytes.Length).WithHead() // pid:5+seq:10+len:4+reqType:1 = 20
+            return HBuffer.NewBuffer(20 + bytes.Length).WithHead() // len:4+reqType:1+pid:5+seq:10 = 20
                 .Write((byte) ReqType.Call)
                 .Write(pid).Write(seq).Write(bytes)
                 .UpdateHead().GetBytes();
@@ -79,16 +100,10 @@ namespace com.haiswork.hrpc
 
         private static byte[] CreatePacket(int pid, byte[] bytes)
         {
-            return HBuffer.NewBuffer(10 + bytes.Length).WithHead() // len:4+pid:5+reqType:1=10
+            return HBuffer.NewBuffer(10 + bytes.Length).WithHead() // len:4+reqType:1+pid:5=10
                 .Write((byte) ReqType.OneWay)
                 .Write(pid).Write(bytes)
                 .UpdateHead().GetBytes();
         }
-
-        public void OnReceivedOneWay(Action<int, byte[]> handlerReceivedOneWay)
-        {
-            _handlerReceivedOneWay = handlerReceivedOneWay;
-        }
-        
     }
 }
